@@ -113,7 +113,7 @@
           (error) => {
             console.error('Error getting location:', error);
           },
-          { enableHighAccuracy: false, timeout: 30000, maximumAge: 0 }
+          {timeout: 30000, maximumAge: 0 }
         );
       } else {
         alert('Geolocation is not supported by your browser.');
