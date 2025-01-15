@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Live Location Tracking</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.7.1/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.7.1/dist/leaflet.js"></script>
+  <script src="/socket.io/socket.io.js"></script>
+  <style>
+    body, html {
+      margin: 0;
+      height: 100%;
+      display: flex;
+      flex-direction: column;
+    }
+    #map {
+      flex: 1;
+      width: 100%;
+    }
+    #userTypeContainer {
+      margin: 10px;
+      text-align: center;
+    }
+  </style>
+</head>
+<body>
+  <div id="map"></div>
+  <div id="userTypeContainer">
+    <label for="userType">User Type:</label>
+    <select id="userType">
+      <option value="customer">Customer</option>
+      <option value="deliveryBoy">Delivery Boy</option>
+    </select>
+    <button onclick="startTracking()">Start Tracking</button>
+  </div>
+  <script>
+    const socket = io();
+    const map = L.map('map').setView([20, 77], 5); // Default view (India)
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '© OpenStreetMap contributors'
+    }).addTo(map);
+
+    const markers = {};
+    const markerOffsets = {}; // Track offsets for overlapping markers
+    let userType = null;
+    let userId = null;
+
+    // Custom icons
+    const deliveryBoyIcon = L.icon({
+      iconUrl: './images/delboy.png', // Bike icon URL
+      iconSize: [36, 36],
+      iconAnchor: [16, 16],
+    });
+
+    const customerIcon = L.icon({
+      iconUrl: './images/person-male.png', // Customer icon URL
+      iconSize: [32, 32],
+      iconAnchor: [16, 16],
+    });
+
+    socket.on('update-location', (data) => {
+      const icon = data.type === 'deliveryBoy' ? deliveryBoyIcon : customerIcon;
+
+      // Calculate offset if markers overlap
+      const offset = calculateOffset(data);
+
+      // Update or create the marker
+      if (!markers[data.userId]) {
+        markers[data.userId] = L.marker(
+          [data.latitude + offset.lat, data.longitude + offset.lng],
+          { icon }
+        )
+          .addTo(map)
+          .bindPopup(`${data.type === 'deliveryBoy' ? 'Delivery Boy' : 'Customer'}: ${data.userId}`);
+      } else {
+        markers[data.userId].setLatLng([
+          data.latitude + offset.lat,
+          data.longitude + offset.lng,
+        ]);
+        markers[data.userId].getPopup().setContent(
+          `${data.type === 'deliveryBoy' ? 'Delivery Boy' : 'Customer'}: ${data.userId}`
+        );
+      }
+
+      // Auto-focus on the delivery person for customers
+      if (userType === 'customer' && data.type === 'deliveryBoy') {
+        map.setView([data.latitude, data.longitude], 15);
+      }
+    });
+
+    function startTracking() {
+      userType = document.getElementById('userType').value;
+      userId = `${userType}-${socket.id}`;
+
+      if (!userType) {
+        alert('Please select a user type.');
+        return;
+      }
+
+      if (navigator.geolocation) {
+        navigator.geolocation.watchPosition(
+          (position) => {
+            const { latitude, longitude } = position.coords;
+
+            socket.emit('send-location', {
+              userId,
+              latitude,
+              longitude,
+              type: userType,
+            });
+          },
+          (error) => {
+            console.error('Error getting location:', error);
+          },
+          { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+        );
+      } else {
+        alert('Geolocation is not supported by your browser.');
+      }
+    }
+
+    function calculateOffset(data) {
+      const nearbyThreshold = 0.0001; // Distance threshold to consider markers "overlapping"
+      const offsetStep = 0.0001; // Offset step to move markers
+      let latOffset = 0;
+      let lngOffset = 0;
+
+      for (const key in markers) {
+        const marker = markers[key];
+        const markerLatLng = marker.getLatLng();
+
+        // Check if the markers are close
+        const distanceLat = Math.abs(markerLatLng.lat - data.latitude);
+        const distanceLng = Math.abs(markerLatLng.lng - data.longitude);
+
+        if (distanceLat < nearbyThreshold && distanceLng < nearbyThreshold) {
+          latOffset += offsetStep;
+          lngOffset += offsetStep;
+        }
+      }
+
+      return { lat: latOffset, lng: lngOffset };
+    }
+  </script>
+</body>
+</html>
